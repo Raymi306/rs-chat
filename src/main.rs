@@ -61,11 +61,8 @@ fn spawn_stdin_channel() -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || loop {
         let mut buffer = String::new();
-        io::stdin().read_line(&mut buffer).unwrap();
-        match tx.send(buffer.trim_end().to_string()) {
-            Err(_e) => return,
-            _ => (),
-        }
+        io::stdin().read_line(&mut buffer).expect("stdin read_line failure");
+        tx.send(buffer.trim_end().to_string()).expect("mpsc tx failure");
     });
     rx
 }
@@ -114,7 +111,7 @@ fn handle_connection(mut stream: net::TcpStream) {
         }
         match stdin_channel.try_recv() {
             Ok(input) => {
-                stream.write(input.as_bytes()).unwrap();
+                stream.write_all(input.as_bytes()).expect("TCP stream write failure");
             },
             Err(mpsc::TryRecvError::Empty) => (),
             Err(mpsc::TryRecvError::Disconnected) => {
