@@ -20,23 +20,9 @@ fn main() {
     };
     let socket_addr = net::SocketAddrV4::new(config.address, config.port);
     if config.listen {
-        let listener = match net::TcpListener::bind(socket_addr) {
-            Ok(listener) => listener,
-            Err(e) => exit(3, &e),
-        };
-        for stream_result in listener.incoming() {
-            let stream = match stream_result {
-                Ok(stream) => stream,
-                Err(e) => exit(4, &e),
-            };
-            handle_connection(stream);
-        }
+        listen(socket_addr);
     } else {
-        let connection = match net::TcpStream::connect(socket_addr) {
-            Ok(conn) => conn,
-            Err(e) => exit(5, &e),
-        };
-        handle_connection(connection);
+        connect(socket_addr);
     }
 }
 
@@ -76,9 +62,34 @@ fn spawn_stdin_channel() -> mpsc::Receiver<[u8; 1500]> {
     thread::spawn(move || loop {
         let mut in_buffer = [0; 1500];
         io::stdin().read(&mut in_buffer).unwrap();
-        tx.send(in_buffer).unwrap();
+        match tx.send(in_buffer) {
+            Err(_e) => return,
+            _ => (),
+        }
     });
     rx
+}
+
+fn listen(socket_addr: net::SocketAddrV4) {
+    let listener = match net::TcpListener::bind(socket_addr) {
+        Ok(listener) => listener,
+        Err(e) => exit(3, &e),
+    };
+    for stream_result in listener.incoming() {
+        let stream = match stream_result {
+            Ok(stream) => stream,
+            Err(e) => exit(4, &e),
+        };
+        handle_connection(stream);
+    }
+}
+
+fn connect(socket_addr: net::SocketAddrV4) {
+    let connection = match net::TcpStream::connect(socket_addr) {
+        Ok(conn) => conn,
+        Err(e) => exit(5, &e),
+    };
+    handle_connection(connection);
 }
 
 fn handle_connection(mut stream: net::TcpStream) {
@@ -91,8 +102,17 @@ fn handle_connection(mut stream: net::TcpStream) {
         let mut out_buffer = [0; 1500];
         let mut out_buf_flag = false;
         match stream.read(&mut in_buffer) {
-            Ok(_content) => in_buf_flag = true,
-            _ => {},
+            Ok(recv_size) => {
+                in_buf_flag = true;
+                if recv_size == 0 {
+                    break;
+                }
+            },
+            Err(e) => {
+                if e.kind() != io::ErrorKind::WouldBlock {
+                    break
+                }
+            },
         }
         if in_buf_flag {
             println!("{}", String::from_utf8_lossy(&in_buffer[..]));
