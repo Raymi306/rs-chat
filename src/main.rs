@@ -57,12 +57,12 @@ impl Config {
     }
 }
 
-fn spawn_stdin_channel() -> mpsc::Receiver<[u8; 1500]> {
-    let (tx, rx) = mpsc::channel::<[u8; 1500]>();
+fn spawn_stdin_channel() -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || loop {
-        let mut in_buffer = [0; 1500];
-        io::stdin().read(&mut in_buffer).unwrap();
-        match tx.send(in_buffer) {
+        let mut buffer = String::new();
+        io::stdin().read_line(&mut buffer).unwrap();
+        match tx.send(buffer.trim_end().to_string()) {
             Err(_e) => return,
             _ => (),
         }
@@ -98,14 +98,12 @@ fn handle_connection(mut stream: net::TcpStream) {
     let stdin_channel = spawn_stdin_channel();
     loop {
         let mut in_buffer = [0; 1500];
-        let mut in_buf_flag = false;
-        let mut out_buffer = [0; 1500];
-        let mut out_buf_flag = false;
         match stream.read(&mut in_buffer) {
             Ok(recv_size) => {
-                in_buf_flag = true;
                 if recv_size == 0 {
                     break;
+                } else {
+                    println!("{}", String::from_utf8_lossy(&in_buffer[..]));
                 }
             },
             Err(e) => {
@@ -114,22 +112,15 @@ fn handle_connection(mut stream: net::TcpStream) {
                 }
             },
         }
-        if in_buf_flag {
-            println!("{}", String::from_utf8_lossy(&in_buffer[..]));
-        }
         match stdin_channel.try_recv() {
             Ok(input) => {
-                out_buffer = input;
-                out_buf_flag = true;
+                stream.write(input.as_bytes()).unwrap();
             },
             Err(mpsc::TryRecvError::Empty) => (),
             Err(mpsc::TryRecvError::Disconnected) => {
                 println!("mpsc channel disconnected");
                 break;
             },
-        }
-        if out_buf_flag {
-            stream.write(&out_buffer).unwrap();
         }
     }
 }
